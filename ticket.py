@@ -243,9 +243,8 @@ async def request_one_session(
         resp = await session.get(dynamic_url(show_id, session_id), **request_kwargs)
         
         if resp.status_code != 200:
-            # 如果是403、407、429等错误，可能是代理问题
-            # 407: Proxy Authentication Required（代理认证失败）
-            if resp.status_code in [403, 407, 429]:
+            # 如果是403等错误，可能是代理问题
+            if resp.status_code in [403, 429]:
                 proxy_manager.mark_proxy_failed()
             print(f"⚠️ [{request_time}] 类型: {ticket_type} | 状态码: {resp.status_code}")
             return
@@ -261,10 +260,8 @@ async def request_one_session(
         
         print(f"🔍 [{request_time}] 类型: {ticket_type} | 累积请求: {cumulative_count}")
     except Exception as e:
-        # 请求异常，检查是否是代理认证错误（407）
-        error_str = str(e)
-        if "407" in error_str or "CONNECT tunnel failed" in error_str:
-            proxy_manager.mark_proxy_failed()
+        # 请求异常，可能是代理问题
+        proxy_manager.mark_proxy_failed()
         print(f"❌ [{request_time}] 类型: {ticket_type} | 错误: {e}")
         return
 
@@ -294,19 +291,16 @@ async def request_one_session(
         
         resp = await session.get(static_url(show_id, session_id), **request_kwargs)
         if resp.status_code != 200:
-            # 如果是403、407、429等错误，可能是代理问题
-            # 407: Proxy Authentication Required（代理认证失败）
-            if resp.status_code in [403, 407, 429]:
+            # 如果是403等错误，可能是代理问题
+            if resp.status_code in [403, 429]:
                 proxy_manager.mark_proxy_failed()
             print(f"⚠️ static status {resp.status_code} for {ticket_type} {session_id}")
             return
         # 只有状态码为200时才解析JSON
         static_json = resp.json()
     except Exception as e:
-        # 请求异常，检查是否是代理认证错误（407）
-        error_str = str(e)
-        if "407" in error_str or "CONNECT tunnel failed" in error_str:
-            proxy_manager.mark_proxy_failed()
+        # 请求异常，可能是代理问题
+        proxy_manager.mark_proxy_failed()
         print(f"❌ static error {ticket_type}: {e}")
         return
 
