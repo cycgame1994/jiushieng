@@ -99,7 +99,7 @@ class ProxyManager:
     def mark_proxy_failed(self):
         """标记当前代理失败"""
         self.proxy_failed = True
-        print(f"⚠️ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 代理请求失败，将在｛PROXY_RETRY_INTERVAL｝秒后重新获取")
+        print(f"⚠️ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 代理请求失败，将在{PROXY_RETRY_INTERVAL}秒后重新获取")
 
 
 # 全局代理管理器实例
