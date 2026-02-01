@@ -19,7 +19,7 @@ webhook_url = "https://oapi.dingtalk.com/robot/send?access_token=bdc3b8bd0e3ebdb
 webhook_url2 = "https://oapi.dingtalk.com/robot/send?access_token=61cb96708c2543536319fff172477490cfc3cccb703fa73a0d168786928054f8"
 
 # 轮询间隔
-INTERVAL = 15
+INTERVAL = 10                                                                                                                                                                                                                                                                                                                                                                                
 
 # 定时启动/停止配置（24小时制）
 START_HOUR = 7  # 早上7点启动
@@ -243,8 +243,9 @@ async def request_one_session(
         resp = await session.get(dynamic_url(show_id, session_id), **request_kwargs)
         
         if resp.status_code != 200:
-            # 如果是403等错误，可能是代理问题
-            if resp.status_code in [403, 429]:
+            # 如果是403、407、429等错误，可能是代理问题
+            # 407: Proxy Authentication Required（代理认证失败）
+            if resp.status_code in [403, 407, 429]:
                 proxy_manager.mark_proxy_failed()
             print(f"⚠️ [{request_time}] 类型: {ticket_type} | 状态码: {resp.status_code}")
             return
@@ -260,8 +261,10 @@ async def request_one_session(
         
         print(f"🔍 [{request_time}] 类型: {ticket_type} | 累积请求: {cumulative_count}")
     except Exception as e:
-        # 请求异常，可能是代理问题
-        proxy_manager.mark_proxy_failed()
+        # 请求异常，检查是否是代理认证错误（407）
+        error_str = str(e)
+        if "407" in error_str or "CONNECT tunnel failed" in error_str:
+            proxy_manager.mark_proxy_failed()
         print(f"❌ [{request_time}] 类型: {ticket_type} | 错误: {e}")
         return
 
@@ -291,16 +294,19 @@ async def request_one_session(
         
         resp = await session.get(static_url(show_id, session_id), **request_kwargs)
         if resp.status_code != 200:
-            # 如果是403等错误，可能是代理问题
-            if resp.status_code in [403, 429]:
+            # 如果是403、407、429等错误，可能是代理问题
+            # 407: Proxy Authentication Required（代理认证失败）
+            if resp.status_code in [403, 407, 429]:
                 proxy_manager.mark_proxy_failed()
             print(f"⚠️ static status {resp.status_code} for {ticket_type} {session_id}")
             return
         # 只有状态码为200时才解析JSON
         static_json = resp.json()
     except Exception as e:
-        # 请求异常，可能是代理问题
-        proxy_manager.mark_proxy_failed()
+        # 请求异常，检查是否是代理认证错误（407）
+        error_str = str(e)
+        if "407" in error_str or "CONNECT tunnel failed" in error_str:
+            proxy_manager.mark_proxy_failed()
         print(f"❌ static error {ticket_type}: {e}")
         return
 
@@ -363,7 +369,7 @@ async def monitor_ticket_type(ticket_type, info):
                         proxy
                     )
                     # 随机延迟，防限流（0.3-0.8秒）
-                    await asyncio.sleep(random.uniform(0.3, 0.8))
+                    await asyncio.sleep(random.uniform(1, 2))
 
                 # 如果不在工作时间内，跳出循环等待
                 if not is_working_hours():
