@@ -1,7 +1,7 @@
 import asyncio
 import json
 import random
-from datetime import datetime
+from datetime import datetime, time
 from typing import Optional
 import requests  # 只用于钉钉
 from curl_cffi.requests import AsyncSession
@@ -20,6 +20,10 @@ webhook_url2 = "https://oapi.dingtalk.com/robot/send?access_token=61cb96708c2543
 
 # 轮询间隔
 INTERVAL = 15
+
+# 定时启动/停止配置（24小时制）
+START_HOUR = 7  # 早上7点启动
+STOP_HOUR = 23  # 晚上11点停止
 
 # 请求计数器（用于日志）
 request_counters = {}
@@ -168,6 +172,49 @@ def send_dingdingbot(msg: str):
         print("❌ 钉钉发送失败:", e)
 
 
+# ================== 定时调度 ==================
+
+def is_working_hours() -> bool:
+    """检查当前时间是否在工作时间内"""
+    now = datetime.now()
+    current_hour = now.hour
+    
+    # 如果停止时间（23点）大于启动时间（7点），说明在同一天
+    if STOP_HOUR > START_HOUR:
+        # 工作时间：7:00 - 23:00
+        return START_HOUR <= current_hour < STOP_HOUR
+    else:
+        # 跨天情况：23:00 - 次日7:00 是停止时间
+        # 工作时间：7:00 - 23:00
+        return current_hour >= START_HOUR or current_hour < STOP_HOUR
+
+
+async def wait_until_start_time():
+    """等待到启动时间"""
+    while not is_working_hours():
+        now = datetime.now()
+        current_hour = now.hour
+        
+        # 计算到启动时间的等待时间
+        if current_hour < START_HOUR:
+            # 今天还没到启动时间，等待到今天启动时间
+            target_time = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
+        else:
+            # 已经过了启动时间，等待到明天启动时间
+            from datetime import timedelta
+            target_time = (now + timedelta(days=1)).replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
+        
+        wait_seconds = (target_time - now).total_seconds()
+        wait_time_str = target_time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"⏸️ [{now.strftime('%Y-%m-%d %H:%M:%S')}] 当前不在工作时间，等待到 {wait_time_str} 启动")
+        
+        # 如果等待时间超过60秒，每分钟检查一次；否则直接等待
+        if wait_seconds > 60:
+            await asyncio.sleep(60)
+        else:
+            await asyncio.sleep(max(1, wait_seconds))
+
+
 # ================== 核心请求（dynamic + static） ==================
 
 async def request_one_session(
@@ -292,10 +339,22 @@ async def monitor_ticket_type(ticket_type, info):
 
         while True:
             try:
-                # 获取代理（每55秒自动切换）
+                # 检查是否在工作时间内
+                if not is_working_hours():
+                    print(f"⏸️ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {ticket_type} 不在工作时间，暂停监控")
+                    # 等待到启动时间
+                    await wait_until_start_time()
+                    print(f"▶️ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {ticket_type} 工作时间开始，恢复监控")
+                    continue
+                
+                # 获取代理（每55秒自动切换，只在工作时间内获取）
                 proxy = await proxy_manager.get_proxy()
                 
                 for session_id in sessions.values():
+                    # 再次检查是否还在工作时间内
+                    if not is_working_hours():
+                        break
+                    
                     await request_one_session(
                         session,
                         ticket_type,
@@ -305,6 +364,10 @@ async def monitor_ticket_type(ticket_type, info):
                     )
                     # 随机延迟，防限流（0.3-0.8秒）
                     await asyncio.sleep(random.uniform(0.3, 0.8))
+
+                # 如果不在工作时间内，跳出循环等待
+                if not is_working_hours():
+                    continue
 
                 # 随机延迟，避免固定间隔（INTERVAL的80%-120%）
                 sleep_time = random.uniform(INTERVAL * 0.8, INTERVAL * 1.2)
@@ -320,6 +383,14 @@ async def monitor_ticket_type(ticket_type, info):
 # ================== 主入口 ==================
 
 async def main():
+    # 等待到启动时间
+    await wait_until_start_time()
+    
+    # 设置代理管理器的工作时间检查回调
+    proxy_manager.set_working_hours_callback(is_working_hours)
+    
+    print(f"🚀 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 程序启动，工作时间：{START_HOUR}:00 - {STOP_HOUR}:00")
+    
     tasks = [
         asyncio.create_task(monitor_ticket_type(ticket_type, info))
         for ticket_type, info in shows.items()
